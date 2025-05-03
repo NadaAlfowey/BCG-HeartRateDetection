@@ -14,12 +14,20 @@ from modwt_matlab_fft import modwt
 from modwt_mra_matlab_fft import modwtmra
 from remove_nonLinear_trend import remove_nonLinear_trend
 from data_subplot import data_subplot
+
+from datetime import datetime
 # ======================================================================================================================
+
+# convert from epoch to datetime
+epoch_ms = 1699022112866
+dt = datetime.fromtimestamp(epoch_ms / 1000)
+print("Datetime:", dt)
+
 
 # Main program starts here
 print('\nstart processing ...')
 
-file = '/data/sample_data.csv'
+file = '../data/BCG/01_20231104_BCG.csv'
 
 if file.endswith(".csv"):
     fileName = os.path.join(file)
