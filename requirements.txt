@@ -4,3 +4,6 @@ matplotlib
 py-ecg-detectors
 pandas
 seaborn
+PyWavelets
+scikit-learn 
+pyfftw
