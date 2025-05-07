@@ -10,7 +10,7 @@ def normalize(sig):
     return sig
 
 
-def data_subplot(raw_data, movement, breathing, dc, t1, t2):
+def data_subplot(raw_data, movement, breathing, dc, t1, t2, peaks=None, clean_time=None):
     raw_data = normalize(raw_data)
     movement = normalize(movement)
     breathing = normalize(breathing)
