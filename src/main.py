@@ -131,10 +131,34 @@ if file.endswith(".csv"):
 
 
         # Peak detection from filtered BCG
-        peaks = detect_peaks(wavelet_cycle, mpd = fs_target//2)
+        # Smooth the wavelet component before peak detection
+        # Detect peaks using your custom detect_peaks function
+        peaks = detect_peaks(
+            wavelet_cycle,
+            mph=np.percentile(wavelet_cycle, 75),  # Only keep strong peaks
+            mpd=fs_target//2,                     # Enforce minimum spacing (~150 bpm)
+            edge='rising',
+            kpsh=False,
+            valley=False,
+            show=False
+        )
         peak_times = clean_time[peaks] / 1000.0  # ms to seconds
         rr_intervals_sec = np.diff(peak_times)
         estimated_hr = 60.0 / rr_intervals_sec
+    
+
+
+
+        #temp
+        plt.figure(figsize=(12, 4))
+        plt.plot(clean_time / 1000.0, wavelet_cycle, label='Wavelet Cycle')
+        plt.plot(peak_times, wavelet_cycle[peaks], 'ro', label='Detected Peaks')
+        plt.title('Wavelet Cycle with Detected Peaks')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Amplitude')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig('results/peak_validation.png')
 
         # Compute timestamps for estimated HR (at midpoints between peaks)
         estimated_hr_times = peak_times[1:]
