@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 from scipy.stats import pearsonr
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+from scipy import signal
 
 from band_pass_filtering import band_pass_filtering
 from compute_vitals import vitals
@@ -18,13 +19,12 @@ from modwt_mra_matlab_fft import modwtmra
 from remove_nonLinear_trend import remove_nonLinear_trend
 from data_subplot import data_subplot
 from detect_peaks import detect_peaks
-
 # ======================================================================================================================
 
 print('\nstart processing ...')
 
-file = 'data/BCG/fixed_bcg.csv'
-reference_rr_file = 'data/RR/02_20231103_RR.csv'
+file = 'data/BCG/fixed_bcg2.csv'
+reference_rr_file = 'data/RR/03_20231105_RR.csv'
 
 if file.endswith(".csv"):
     fileName = os.path.join(file)
@@ -34,9 +34,9 @@ if file.endswith(".csv"):
         print("\U0001F4C5 BCG Start:", pd.to_datetime(utc_time.min(), unit='ms'))
         print("\U0001F4C5 BCG End  :", pd.to_datetime(utc_time.max(), unit='ms'))
         data_stream = rawData["BCG"].values
-        fs = 50
+        fs_original = int(rawData["fs"].iloc[0])
         print("✅ Loaded samples:", len(data_stream))
-        print("✅ Sampling frequency (Hz):", fs)
+        print("✅ Sampling frequency (Hz):", 50 )
 
         # Load ECG-declived reference HR
         rr_data = pd.read_csv(reference_rr_file)
@@ -58,25 +58,58 @@ if file.endswith(".csv"):
         synced_utc = utc_time[mask_bcg]
         synced_rr = rr_data.loc[mask_rr]
         reference_hr = synced_rr['Heart Rate'].replace(0, np.nan).dropna().to_numpy()
+        
+        # Resample BCG to 50Hz
+        # n_samples_50hz = int((end_time - start_time) / 1000 * fs)
+        # synced_bcg_resampled = resample(synced_bcg, n_samples_50hz)
+        # N = len(synced_bcg_resampled)
+        
 
-        n_samples_50hz = int((end_time - start_time) / 1000 * fs)
-        synced_bcg_resampled = resample(synced_bcg, n_samples_50hz)
-        N = len(synced_bcg_resampled)
+        # Step 1: Compute the true time-based duration of the synced BCG signal
+        start_time = pd.to_datetime(synced_utc[0], unit='ms')
+        end_time = pd.to_datetime(synced_utc[-1], unit='ms')
+        duration_sec = (end_time - start_time).total_seconds()
 
-        duration_sec = (synced_utc[-1] - synced_utc[0]) / 1000.0  # in seconds
-        resampled_time = np.linspace(start_time, end_time, n_samples_50hz)
+        # Step 2: Calculate resampled size based on time, not sample count
+        fs_target = 50
+        num_samples = int(duration_sec * fs_target)
 
-        print("\U0001F552 Sync window (ms):", start_time, "→", end_time)
-        print("\U0001F4CA Synced BCG samples:", len(synced_bcg))
-        print("\U0001F4CA Synced RR samples:", len(reference_hr))
+        # Step 3: Resample BCG signal
+        resampled_bcg = resample(synced_bcg, num_samples)
 
-        # Denoise + Remove Movement Artifacts
+        # Step 4: Generate accurate time index for 50Hz spacing
+        resampled_index = pd.date_range(start=start_time, periods=num_samples, freq='20ms')
+
+        # Step 5: Create DataFrame
+        resampled_df = pd.DataFrame({
+            'Timestamp': resampled_index,
+            'BCG': resampled_bcg
+        })
+        resampled_df.set_index('Timestamp', inplace=True)
+
+        # Step 6: Time axis in milliseconds for later processing
+        resampled_time = np.arange(0, len(resampled_df) * 20, 20)
+
+        # Debug print
+        print("⏱ Duration (seconds):", duration_sec)
+        print("🧠 Resampled BCG samples:", len(resampled_df))
+        print("\U0001F552 Sync window (ms):", resampled_index[0], "→", resampled_index[-1])
+
+        # Denoise and remove movement artifacts
+        # Denoise and remove movement artifacts
         start_point, end_point, window_shift = 0, 500, 500
-        clean_bcg, clean_time = detect_patterns(start_point, end_point, window_shift, synced_bcg_resampled, resampled_time, plot=1)
+        clean_bcg, clean_time = detect_patterns(
+            start_point,
+            end_point,
+            window_shift,
+            resampled_df['BCG'].values,
+            resampled_time,
+            plot=1
+        )
 
         # Filter for HR and respiratory components
-        movement = band_pass_filtering(clean_bcg, fs, "bcg")
-        breathing = band_pass_filtering(clean_bcg, fs, "breath")
+        movement = band_pass_filtering(clean_bcg, fs_target, "bcg")
+        breathing = band_pass_filtering(clean_bcg, fs_target, "breath")
         breathing = remove_nonLinear_trend(breathing, 3)
         breathing = savgol_filter(breathing, 11, 3)
 
@@ -97,15 +130,24 @@ if file.endswith(".csv"):
 
 
         # Peak detection from filtered BCG
-        peaks = detect_peaks(wavelet_cycle, mpd=fs//2)
+        peaks = detect_peaks(wavelet_cycle)
         peak_times = clean_time[peaks] / 1000.0  # ms to seconds
         rr_intervals_sec = np.diff(peak_times)
         estimated_hr = 60.0 / rr_intervals_sec
 
-        # Align arrays
-        min_len = min(len(estimated_hr), len(reference_hr))
+
+        # Compute timestamps for estimated HR (at midpoints between peaks)
+        estimated_hr_times = peak_times[1:]  # aligns each HR value with the second peak
+
+        # Use raw RR values directly (only for plotting and comparison, not interpolation)
+        reference_hr = synced_rr['Heart Rate'].replace(0, np.nan).dropna().values
+
+        # Truncate estimated HR to match length
+        min_len = min(len(reference_hr), len(estimated_hr))
         estimated_hr = estimated_hr[:min_len]
         reference_hr = reference_hr[:min_len]
+        estimated_hr_times = estimated_hr_times[:min_len]
+
 
         # Metrics
         mae = mean_absolute_error(reference_hr, estimated_hr)
@@ -116,6 +158,9 @@ if file.endswith(".csv"):
         print('MAE:', mae)
         print('RMSE:', rmse)
         print('MAPE:', mape)
+
+
+
 
         # Bland-Altman
         mean_hr = (estimated_hr + reference_hr) / 2
@@ -142,6 +187,7 @@ if file.endswith(".csv"):
 
         # Vitals
         t1, t2, window_length, window_shift = 0, 500, 500, 500
+        hop_size = math.floor((window_length - 1) / 2)
         limit = int(math.floor(breathing.size / window_shift))
         hr_beats = vitals(t1, t2, window_shift, limit, wavelet_cycle, clean_time, mpd=1, plot=0)
         print('\nHeart Rate Information')
@@ -161,7 +207,50 @@ if file.endswith(".csv"):
         t1, t2 = 2500, 5000
         data_subplot(clean_bcg, movement, breathing, wavelet_cycle, t1, t2)
         
-        num_windows = (N - start_point) // window_shift
-        print(f"Signal length: {N}, Expected number of windows: {num_windows}")
+        plt.figure()
+        plt.plot(reference_hr, label="Reference HR")
+        plt.plot(estimated_hr, label="Estimated HR")
+        plt.legend()
+        plt.title("Comparison of Heart Rates")
+        plt.xlabel("Index")
+        plt.ylabel("Heart Rate (BPM)")
+        plt.savefig('results/hr_comparison.png')
+        print("Reference HR stats:", np.min(reference_hr), np.max(reference_hr), np.mean(reference_hr))
+        print("Estimated HR stats:", np.min(estimated_hr), np.max(estimated_hr), np.mean(estimated_hr))
+        
+        # num_windows = (N - start_point) // window_shift
+        # print(f"Signal length: {N}, Expected number of windows: {num_windows}")
+
+
+
+                # Save
+
+        # Save summary results to file
+        summary_text = f"""Heart Rate Comparison Metrics
+        MAE: {mae}
+        RMSE: {rmse}
+        MAPE: {mape}
+        r value is {r}
+
+        Heart Rate Information
+        Minimum pulse :  {np.around(np.min(hr_beats))}
+        Maximum pulse :  {np.around(np.max(hr_beats))}
+        Average pulse :  {np.around(np.mean(hr_beats))}
+
+        Respiratory Rate Information
+        Minimum breathing :  {np.around(np.min(breath_beats))}
+        Maximum breathing :  {np.around(np.max(breath_beats))}
+        Average breathing :  {np.around(np.mean(breath_beats))}
+
+        Reference HR stats: {np.min(reference_hr)} {np.max(reference_hr)} {np.mean(reference_hr)}
+        Estimated HR stats: {np.min(estimated_hr)} {np.max(estimated_hr)} {np.mean(estimated_hr)}
+        """
+
+        # Ensure the directory exists
+        os.makedirs('results', exist_ok=True)
+
+        # Write to file
+        with open('results/Output.py', 'w') as f:
+            f.write(summary_text)
 
     print('\nEnd processing ...')
