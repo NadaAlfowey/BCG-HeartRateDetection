@@ -1,0 +1,19 @@
+Heart Rate Comparison Metrics
+        MAE: 17.251724404922232
+        RMSE: 25.634579713701758
+        MAPE: 21.418791995076848
+        r value is -0.03271996890551015
+
+        Heart Rate Information
+        Minimum pulse :  53.0
+        Maximum pulse :  91.0
+        Average pulse :  72.0
+
+        Respiratory Rate Information
+        Minimum breathing :  0.0
+        Maximum breathing :  25.0
+        Average breathing :  16.0
+
+        Reference HR stats: 70 115 80.61038495971351
+        Estimated HR stats: 37.97468354430555 333.3333333327944 84.64795464245086
+        

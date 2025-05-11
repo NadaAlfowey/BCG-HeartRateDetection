@@ -41,4 +41,4 @@ def data_subplot(raw_data, movement, breathing, dc, t1, t2):
     ax3.legend(bbox_to_anchor=(1, 1.3), loc='center right')
     plt.subplots_adjust(hspace=0.8)
     
-    plt.savefig('../results/vitals.png')
+    plt.savefig('results/vitals.png')
