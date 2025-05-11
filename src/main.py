@@ -23,8 +23,8 @@ from detect_peaks import detect_peaks
 
 print('\nstart processing ...')
 
-file = '../data/BCG/fixed_bcg.csv'
-reference_rr_file = '../data/BCG/Reference/RR/02_20231103_RR.csv'
+file = 'data/BCG/fixed_bcg.csv'
+reference_rr_file = 'data/RR/02_20231103_RR.csv'
 
 if file.endswith(".csv"):
     fileName = os.path.join(file)
@@ -34,11 +34,11 @@ if file.endswith(".csv"):
         print("\U0001F4C5 BCG Start:", pd.to_datetime(utc_time.min(), unit='ms'))
         print("\U0001F4C5 BCG End  :", pd.to_datetime(utc_time.max(), unit='ms'))
         data_stream = rawData["BCG"].values
-        fs = int(rawData["fs"].iloc[0])
+        fs = 50
         print("✅ Loaded samples:", len(data_stream))
         print("✅ Sampling frequency (Hz):", fs)
 
-        # Load ECG-derived reference HR
+        # Load ECG-declived reference HR
         rr_data = pd.read_csv(reference_rr_file)
         rr_data['Timestamp'] = pd.to_datetime(rr_data['Timestamp'])
 
@@ -53,10 +53,18 @@ if file.endswith(".csv"):
         mask_bcg = (utc_time >= start_time) & (utc_time <= end_time)
         mask_rr = (rr_data['Timestamp'] >= start_time) & (rr_data['Timestamp'] <= end_time)
 
+
         synced_bcg = data_stream[mask_bcg]
         synced_utc = utc_time[mask_bcg]
         synced_rr = rr_data.loc[mask_rr]
         reference_hr = synced_rr['Heart Rate'].replace(0, np.nan).dropna().to_numpy()
+
+        n_samples_50hz = int((end_time - start_time) / 1000 * fs)
+        synced_bcg_resampled = resample(synced_bcg, n_samples_50hz)
+        N = len(synced_bcg_resampled)
+
+        duration_sec = (synced_utc[-1] - synced_utc[0]) / 1000.0  # in seconds
+        resampled_time = np.linspace(start_time, end_time, n_samples_50hz)
 
         print("\U0001F552 Sync window (ms):", start_time, "→", end_time)
         print("\U0001F4CA Synced BCG samples:", len(synced_bcg))
@@ -64,7 +72,7 @@ if file.endswith(".csv"):
 
         # Denoise + Remove Movement Artifacts
         start_point, end_point, window_shift = 0, 500, 500
-        clean_bcg, clean_time = detect_patterns(start_point, end_point, window_shift, synced_bcg, synced_utc, plot=1)
+        clean_bcg, clean_time = detect_patterns(start_point, end_point, window_shift, synced_bcg_resampled, resampled_time, plot=1)
 
         # Filter for HR and respiratory components
         movement = band_pass_filtering(clean_bcg, fs, "bcg")
@@ -75,7 +83,18 @@ if file.endswith(".csv"):
         # Wavelet transform
         w = modwt(movement, 'bior3.9', 4)
         dc = modwtmra(w, 'bior3.9')
-        wavelet_cycle = dc[4]
+        wavelet_cycle = dc[4]  # Level 4 smooth
+        
+
+        #plot wavelet cycle
+        plt.figure()
+        plt.plot(clean_time, wavelet_cycle, color='k', lw=2)
+        plt.title('Wavelet Cycle')
+        plt.xlabel('Time [ms]')
+        plt.ylabel('Amplitude')
+        #save figure
+        plt.savefig('results/wavelet_cycle.png')
+
 
         # Peak detection from filtered BCG
         peaks = detect_peaks(wavelet_cycle, mpd=fs//2)
@@ -109,16 +128,17 @@ if file.endswith(".csv"):
         plt.title("Bland-Altman Plot")
         plt.xlabel("Mean HR")
         plt.ylabel("Difference (Estimated - Reference)")
-        plt.savefig('../results/bland_altman.png')
+        plt.savefig('results/bland_altman.png')
 
         # Pearson
         r, _ = pearsonr(reference_hr, estimated_hr)
+        print(f"r value is {r}")
         plt.figure()
         plt.scatter(reference_hr, estimated_hr)
         plt.title(f"Pearson Correlation (r={r:.2f})")
         plt.xlabel("Reference HR")
         plt.ylabel("Estimated HR")
-        plt.savefig('../results/pearson_correlation.png')
+        plt.savefig('results/pearson_correlation.png')
 
         # Vitals
         t1, t2, window_length, window_shift = 0, 500, 500, 500
@@ -135,10 +155,13 @@ if file.endswith(".csv"):
         print('Maximum breathing : ', np.around(np.max(breath_beats)))
         print('Average breathing : ', np.around(np.mean(breath_beats)))
 
-        events = apnea_events(breathing, clean_time, thresh=0.3)
+        # events = apnea_events(breathing, clean_time, thresh=0.3)
 
         # Visualization
         t1, t2 = 2500, 5000
         data_subplot(clean_bcg, movement, breathing, wavelet_cycle, t1, t2)
+        
+        num_windows = (N - start_point) // window_shift
+        print(f"Signal length: {N}, Expected number of windows: {num_windows}")
 
     print('\nEnd processing ...')
