@@ -57,7 +57,8 @@ if file.endswith(".csv"):
         synced_bcg = data_stream[mask_bcg]
         synced_utc = utc_time[mask_bcg]
         synced_rr = rr_data.loc[mask_rr]
-        reference_hr = synced_rr['Heart Rate'].replace(0, np.nan).dropna().to_numpy()
+    
+        #reference_hr = synced_rr['Heart Rate'].replace(0, np.nan).dropna().to_numpy()
         
         # Resample BCG to 50Hz
         # n_samples_50hz = int((end_time - start_time) / 1000 * fs)
@@ -130,19 +131,25 @@ if file.endswith(".csv"):
 
 
         # Peak detection from filtered BCG
-        peaks = detect_peaks(wavelet_cycle)
+        peaks = detect_peaks(wavelet_cycle, mpd = fs_target//2)
         peak_times = clean_time[peaks] / 1000.0  # ms to seconds
         rr_intervals_sec = np.diff(peak_times)
         estimated_hr = 60.0 / rr_intervals_sec
 
-
         # Compute timestamps for estimated HR (at midpoints between peaks)
-        estimated_hr_times = peak_times[1:]  # aligns each HR value with the second peak
+        estimated_hr_times = peak_times[1:]
 
-        # Use raw RR values directly (only for plotting and comparison, not interpolation)
-        reference_hr = synced_rr['Heart Rate'].replace(0, np.nan).dropna().values
+        # Convert synced_utc[0] to seconds (to align with rr_times in UNIX seconds)
+        start_unix_sec = synced_utc[0] / 1000.0
+        estimated_hr_times = estimated_hr_times + start_unix_sec
 
-        # Truncate estimated HR to match length
+        # Interpolate reference HR to match estimated HR times
+        synced_rr = synced_rr.drop_duplicates(subset='Timestamp')
+        rr_times = synced_rr['Timestamp'].values / 1000.0
+        rr_values = synced_rr['Heart Rate'].replace(0, np.nan).interpolate().values
+        reference_hr = np.interp(estimated_hr_times, rr_times, rr_values)
+
+        # Align arrays
         min_len = min(len(reference_hr), len(estimated_hr))
         estimated_hr = estimated_hr[:min_len]
         reference_hr = reference_hr[:min_len]
@@ -223,8 +230,6 @@ if file.endswith(".csv"):
 
 
 
-                # Save
-
         # Save summary results to file
         summary_text = f"""Heart Rate Comparison Metrics
         MAE: {mae}
@@ -250,7 +255,7 @@ if file.endswith(".csv"):
         os.makedirs('results', exist_ok=True)
 
         # Write to file
-        with open('results/Output.py', 'w') as f:
+        with open('results/Output', 'w') as f:
             f.write(summary_text)
 
     print('\nEnd processing ...')
