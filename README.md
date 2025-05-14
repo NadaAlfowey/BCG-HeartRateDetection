@@ -1,10 +1,10 @@
-```markdown
+
 # BCG-HeartRateDetection
 
 A Python-based pipeline for heart rate detection from bed-embedded Ballistocardiogram (BCG) sensors. This system processes raw BCG signals, filters out noise and movement artifacts, detects peaks corresponding to heartbeats, and estimates heart rate over time. The results are compared against ECG-derived reference heart rates for evaluation.
 
 ## 📁 Project Structure
-```
+```bash
 
 data/
 ├── BCG/
